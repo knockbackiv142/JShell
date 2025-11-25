@@ -4,8 +4,9 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/wait.h>
+#include "builtins.h"
 
-#define PROMPT "$ "
+#define PROMPT "jshell$ "
 #define HISTORY_LENGTH 1024
 #define MAX_ARGS 1024
 #define TOKEN_SEP " \t"
@@ -21,11 +22,13 @@ int s_read(char *input, char **args) {
 	return i;
 }
 int s_execute(char *cmd, char **cmd_args) {
-	fprintf(stdout, "Executing %s\n", cmd);
 
 	int status;
 	pid_t pid;
-
+	if (is_builtin(cmd_args[0])) {
+		return run_builtin(cmd_args);
+		
+	}
 	pid = fork();
 	if (pid < 0) {
 		return 1;
@@ -33,6 +36,8 @@ int s_execute(char *cmd, char **cmd_args) {
 
 	if (pid == 0) {
 		execv(cmd, cmd_args);
+		perror("execv");
+		exit(1);
 		
 	} else {
 		if (waitpid (pid, &status, 0) != pid) {
@@ -80,19 +85,29 @@ int main(void) {
 
   while((line = linenoise(PROMPT)) != NULL) {
     int args_read = s_read(line, args);
-    fprintf(stdout, "Read %d args\n", args_read);
-    for (int i = 0; i < args_read; i++) {
-    	fprintf(stdout, "args[%d] - %s\n", i, args[i]);
-    }
     
     if (args_read == 0) {
 	linenoiseFree(line);
 	continue;
     }
+    /* built-ins go first */
+    if (is_builtin(args[0])) {
+    	run_builtin(args);
+    	linenoiseHistoryAdd(line);
+    	linenoiseFree(line);
+    	continue;               // do NOT search PATH or fork
+    }
 
+/* external command */
     char *cmd = path_finder(args[0]);
-    char **cmd_args = args;
-    s_execute(cmd, cmd_args);
+    if (cmd == NULL) {
+    	fprintf(stderr, "%s: command not found\n", args[0]);
+ 	linenoiseHistoryAdd(line);
+    	linenoiseFree(line);
+    	continue;
+    }
+
+    s_execute(cmd, args);	
     linenoiseHistoryAdd(line);
     linenoiseFree(line);    
   }
